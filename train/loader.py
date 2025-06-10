@@ -57,15 +57,19 @@ def _load_dataset(name: str, root: str | Path, *, train: bool = True, img_size: 
     name_lc = name.lower()
 
     if name_lc == "custom9":
+        if not root.exists():
+            raise FileNotFoundError(f"Dataset root path does not exist: {root}")
         return ImageFolder(root=root, transform=_get_transform(train, img_size))
 
     if name_lc.startswith("cifar"):
+        if not root.exists():
+            root.mkdir(parents=True, exist_ok=True)
         return CIFAR10(root=root,
                        train=train,
-                       download=False,
+                       download=True,
                        transform=_get_transform(train, img_size))
 
-    raise ValueError(f"Unsupported dataset identifier '{name}'")
+    raise ValueError(f"Unsupported dataset identifier '{name}'. Supported: ['custom9', 'cifar10']")
 
 
 # ──────────────────────────────────────────────────────────────

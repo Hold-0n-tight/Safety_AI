@@ -1,4 +1,5 @@
 model:
+  name: resnet50
   output_dim: 9
 
 train:
@@ -15,3 +16,8 @@ fl:
   fraction_fit: 1.0
   min_fit_clients: 5
   min_available_clients: 5
+
+dataset:
+  name: custom9
+  root: data/train/raw
+  split_path: data/split/dirichlet_alpha5.json

@@ -1,8 +1,9 @@
 model:
+  name: resnet50
   output_dim: 9
 
 train:
-  strategy: fedbn
+  strategy: fedavg
   rounds: 50
   local_epochs: 5
   batch_size: 32
@@ -15,5 +16,7 @@ fl:
   min_fit_clients: 5
   min_available_clients: 5
 
-fedbn:
-  freeze_bn: true 
+dataset:
+  name: custom9
+  root: data/train/raw
+  split_path: data/split/dirichlet_alpha5.json

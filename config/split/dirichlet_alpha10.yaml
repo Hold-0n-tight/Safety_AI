@@ -3,7 +3,7 @@ dataset:
   root: data/train/raw
   split:
     type: dirichlet             # Dirichlet partitioning
-    alpha: 100.0                # Large α → uniform
+    alpha: 10.0                 # Medium α → moderate non-IID
     num_clients: 5
     seed: 42
     cache: true                 # Cache split indices on disk

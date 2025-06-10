@@ -98,21 +98,41 @@ class FedBNStrategy(fl.server.strategy.FedAvg):
         results: List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.FitRes]],
         failures,
     ) -> Tuple[fl.common.Parameters | None, Dict[str, fl.common.Scalar]]:
-        # 기본 FedAvg 결과
-        agg_params, metrics = super().aggregate_fit(rnd, results, failures)
-        if agg_params is None:
-            return None, metrics
+        """FedBN aggregation: 비-BN 파라미터만 평균화, BN 파라미터는 제외"""
+        if not results:
+            return None, {}
 
-        # ndarrays로 변환
-        agg_ndarrays = fl.common.parameters_to_ndarrays(agg_params)
-        first_ndarrays = fl.common.parameters_to_ndarrays(results[0][1].parameters)
+        # 클라이언트별 파라미터 수집
+        weights_results = [
+            (fl.common.parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
+            for _, fit_res in results
+        ]
 
-        # BN 파라미터는 첫 클라이언트 값 그대로 사용
-        merged: List[np.ndarray] = []
-        for name, w_avg, w_first in zip(self._parameter_names, agg_ndarrays, first_ndarrays):
-            merged.append(w_first if _is_bn_param(name) else w_avg)
+        # 비-BN 파라미터만 평균화
+        aggregated_ndarrays = []
+        for i, param_name in enumerate(self._parameter_names):
+            if _is_bn_param(param_name):
+                # BN 파라미터: 서버에서 전혀 건드리지 않음 (클라이언트가 로컬 값 유지)
+                # 더미 값으로 0으로 채운 배열 사용 (실제로는 클라이언트에서 무시됨)
+                dummy_shape = weights_results[0][0][i].shape
+                aggregated_ndarrays.append(np.zeros(dummy_shape, dtype=weights_results[0][0][i].dtype))
+            else:
+                # 비-BN 파라미터: 가중 평균
+                total_examples = sum(num_examples for _, num_examples in weights_results)
+                weighted_avg = np.zeros_like(weights_results[0][0][i])
+                
+                for weights, num_examples in weights_results:
+                    weighted_avg += weights[i] * (num_examples / total_examples)
+                
+                aggregated_ndarrays.append(weighted_avg)
 
-        return fl.common.ndarrays_to_parameters(merged), metrics
+        # 메트릭 계산
+        metrics_aggregated = {}
+        if results:
+            total_examples = sum(fit_res.num_examples for _, fit_res in results)
+            metrics_aggregated["total_examples"] = total_examples
+
+        return fl.common.ndarrays_to_parameters(aggregated_ndarrays), metrics_aggregated
 
 
 # ──────────────────────────────────────────────────────────────

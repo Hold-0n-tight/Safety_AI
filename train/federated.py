@@ -46,6 +46,8 @@ class FederatedClient(NumPyClient):
         self.train_loader = train_loader
         self.test_loader = test_loader
         self.cfg = cfg
+        # FedBN 지원을 위한 로컬 BN 파라미터 저장
+        self._local_bn_params = {}
 
     # Flower API ------------------------------------------------------------------
     def get_parameters(self, config: Dict | None):  # noqa: D401
@@ -53,10 +55,38 @@ class FederatedClient(NumPyClient):
         return [t.detach().cpu().numpy() for t in self.model.state_dict().values()]
 
     def set_parameters(self, parameters: List):
+        """Set model parameters, preserving BN parameters for FedBN strategy."""
         state_dict = self.model.state_dict()
-        for k, v in zip(state_dict.keys(), parameters):
-            state_dict[k] = torch.tensor(v, device=self.device)
+        param_names = list(state_dict.keys())
+        
+        # FedBN인 경우 BN 파라미터는 로컬 값 유지
+        is_fedbn = self.cfg.train.strategy.lower() == "fedbn"
+        
+        for i, (param_name, param_tensor) in enumerate(zip(param_names, parameters)):
+            if is_fedbn and self._is_bn_param(param_name):
+                # FedBN: BN 파라미터는 로컬 값 유지 (서버 값 무시)
+                if param_name in self._local_bn_params:
+                    state_dict[param_name] = self._local_bn_params[param_name]
+                # 아니면 현재 로컬 값 그대로 유지
+            else:
+                # 비-BN 파라미터는 서버 값 적용
+                state_dict[param_name] = torch.tensor(param_tensor, device=self.device)
+        
         self.model.load_state_dict(state_dict, strict=True)
+        
+        # FedBN인 경우 현재 BN 파라미터를 로컬 저장소에 백업
+        if is_fedbn:
+            for param_name, param_value in state_dict.items():
+                if self._is_bn_param(param_name):
+                    self._local_bn_params[param_name] = param_value.clone()
+
+    def _is_bn_param(self, name: str) -> bool:
+        """Check if parameter name corresponds to BatchNorm parameter."""
+        return (
+            ".running_mean" in name
+            or ".running_var" in name
+            or ".num_batches_tracked" in name
+        )
 
     def fit(self, parameters, config):  # noqa: D401
         self.set_parameters(parameters)
@@ -79,6 +109,12 @@ class FederatedClient(NumPyClient):
                     loss += 0.5 * mu * prox
                 loss.backward()
                 optimizer.step()
+
+        # FedBN: 훈련 후 BN 파라미터 로컬 저장소 업데이트
+        if self.cfg.train.strategy.lower() == "fedbn":
+            for param_name, param_value in self.model.state_dict().items():
+                if self._is_bn_param(param_name):
+                    self._local_bn_params[param_name] = param_value.clone()
 
         return self.get_parameters(config), len(self.train_loader.dataset), {}
 
