@@ -26,7 +26,7 @@ from omegaconf import DictConfig
 
 from models import init_net
 from strategies import get_strategy
-from utils.loader import get_dataloaders_from_split
+from loader import get_dataloaders_from_split
 
 # ──────────────────────────────────────────────────────────────
 # Global device configuration
@@ -63,6 +63,8 @@ class FederatedClient(NumPyClient):
         self.model.train()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.cfg.train.lr)
         criterion = torch.nn.CrossEntropyLoss()
+        global_params = [p.detach().clone() for p in self.model.parameters()]
+        mu = float(config.get("mu", 0.0))
 
         for _ in range(self.cfg.train.local_epochs):
             for x, y in self.train_loader:
@@ -70,6 +72,11 @@ class FederatedClient(NumPyClient):
                 optimizer.zero_grad()
                 logits = self.model(x)
                 loss = criterion(logits, y)
+                if mu > 0:
+                    prox = 0.0
+                    for w, w0 in zip(self.model.parameters(), global_params):
+                        prox += (w - w0).pow(2).sum()
+                    loss += 0.5 * mu * prox
                 loss.backward()
                 optimizer.step()
 
@@ -113,6 +120,7 @@ def run_federated_training(cfg: DictConfig) -> None:
             split_indices=client_splits[f"client_{client_id}"],
             data_root=cfg.dataset.root,
             batch_size=cfg.train.batch_size,
+            dataset_name=cfg.dataset.name,
         )
         model = init_net(cfg.model.name, cfg.model.output_dim)
         return FederatedClient(model, train_loader, test_loader, cfg)
